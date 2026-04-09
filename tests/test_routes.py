@@ -33,6 +33,7 @@ from service.common import status
 from service.models import db, init_db, Product
 from tests.factories import ProductFactory
 from urllib.parse import quote_plus
+from unittest.mock import patch
 
 # Disable all but critical errors during normal test run
 # uncomment for debugging failing tests
@@ -69,9 +70,13 @@ class TestProductRoutes(TestCase):
 
     def setUp(self):
         """Runs before each test"""
-        self.client = app.test_client()
+        self.app = app
+        self.app.config["TESTING"] = True
+        self.app.config["PROPAGATE_EXCEPTIONS"] = False  # ✅ IMPORTANT
+        self.client = self.app.test_client()
         db.session.query(Product).delete()  # clean up the last tests
         db.session.commit()
+    
 
     def tearDown(self):
         db.session.remove()
@@ -179,6 +184,33 @@ class TestProductRoutes(TestCase):
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
         data = response.get_json()
         self.assertIn("was not found", data["message"])
+    
+    def test_method_not_allowed(self):
+        """It should return 405 when using unsupported HTTP method"""
+        
+        # Assuming BASE_URL supports GET but not PUT
+        response = self.client.put(BASE_URL)
+
+        self.assertEqual(response.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
+        
+        data = response.get_json()
+        self.assertEqual(data["status"], status.HTTP_405_METHOD_NOT_ALLOWED)
+        self.assertEqual(data["error"], "Method not Allowed")
+        self.assertIn("Method Not Allowed", data["message"])
+
+
+    def test_internal_server_error(self):
+        """It should return 500 when an unhandled exception occurs"""
+
+        with patch("service.routes.Product.find", side_effect=Exception("Test Exception")):
+            response = self.client.get(f"{BASE_URL}/1")
+
+            self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+            data = response.get_json()
+            self.assertEqual(data["status"], status.HTTP_500_INTERNAL_SERVER_ERROR)
+            self.assertEqual(data["error"], "Internal Server Error")
+            self.assertIn("Internal Server Error", data["message"])
 
     def test_delete_product(self):
         """It should Delete a Product"""
